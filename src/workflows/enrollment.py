@@ -17,7 +17,7 @@ from ..face.recognition import (
 )
 from ..database.storage import DatabaseManager, EnrollmentResult
 from ..utils.config import get_config
-
+from ..iris.recognition import IrisRecognitionSystem
 
 @dataclass
 class EnrollmentSession:
@@ -79,6 +79,7 @@ class FaceEnrollmentWorkflow:
         
         self.camera = camera or Camera()
         self.face_system = face_system or FaceRecognitionSystem()
+        self.iris_system = IrisRecognitionSystem()
         self.db = db_manager or DatabaseManager()
         
         # Ensure database is initialized
@@ -156,7 +157,7 @@ class FaceEnrollmentWorkflow:
                 distance = float(face_recognition.face_distance([existing.encoding], detected_face.encoding)[0])
                 
                 # If too similar (distance < 0.1), it's probably the same pose
-                if distance < 0.1:
+                if distance < 0.08:
                     return False, "Too similar to existing sample, move slightly", None
         
         # Valid sample
@@ -193,7 +194,8 @@ class FaceEnrollmentWorkflow:
         
         # Extract encodings from samples
         encodings = [sample.encoding for sample in session.captured_samples]
-        
+
+
         # Enroll in database
         result = self.db.enroll_user(
             user_id=session.user_id,
@@ -202,8 +204,52 @@ class FaceEnrollmentWorkflow:
             quality_scores=session.quality_scores,
             metadata=metadata
         )
-        
+
+        if not result.success:
+            return result
+
+        print("\nCapturing iris templates...")
+
+        iris_capture = self.camera.read_frame()
+
+        if iris_capture.success and iris_capture.frame is not None:
+            eye_regions = self.iris_system.extract_eye_regions(iris_capture.frame)
+
+            if eye_regions:
+                left_crop = self.iris_system.crop_eye(
+                    iris_capture.frame,
+                    eye_regions["left_eye"]
+                )
+
+                right_crop = self.iris_system.crop_eye(
+                    iris_capture.frame,
+                    eye_regions["right_eye"]
+                )
+
+                left_template = self.iris_system.generate_iris_template(left_crop)
+                right_template = self.iris_system.generate_iris_template(right_crop)
+
+                self.db.save_iris_template(
+                    session.user_id,
+                    left_template,
+                    "left"
+                )
+
+                self.db.save_iris_template(
+                    session.user_id,
+                    right_template,
+                    "right"
+                )
+
+                print("✓ Iris templates saved")
+            else:
+                print("⚠ Iris capture failed: Eyes not detected")
+        else:
+            print("⚠ Iris capture failed: Could not read camera frame")
+
         return result
+
+
     
     def enroll_interactive(
         self,
@@ -211,7 +257,7 @@ class FaceEnrollmentWorkflow:
         name: str,
         num_samples: Optional[int] = None,
         show_preview: bool = True,
-        timeout: float = 60.0
+        timeout: float = 120.0
     ) -> EnrollmentResult:
         """Run interactive enrollment with live camera preview.
         
@@ -270,9 +316,11 @@ class FaceEnrollmentWorkflow:
                 frame = result.frame
                 current_time = time.time()
                 auto_capture = (current_time - last_capture_time) >= self.sample_interval
+                print("AUTO CAPTURE CHECK:", auto_capture, "interval =", self.sample_interval)
                 
                 # Try to detect faces for preview
                 detected_faces = self.face_system.detect_and_encode(frame)
+                print("ENROLLMENT DEBUG: faces =", len(detected_faces))
                 
                 if detected_faces:
                     largest_face = self.face_system.get_largest_face(detected_faces)

@@ -48,38 +48,39 @@ class Camera:
         self.device_id = device_id if device_id is not None else self.config.camera.device_id
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_open = False
-        
+
     def open(self) -> bool:
-        """
-        Open the camera device.
-        
-        Returns:
-            True if camera opened successfully.
-        """
-        if self.is_open:
+            """
+            Open the camera device.
+            """
+
+            if self.is_open:
+                return True
+
+            # MOBILE CAMERA STREAM URL
+            url = "http://172.30.168.162:8080/video"
+
+            print(f"Connecting to mobile camera: {url}")
+
+            self.cap = cv2.VideoCapture(url)
+
+            if not self.cap.isOpened():
+                print("Error: Could not open mobile camera")
+                return False
+
+            # Test frame
+            ret, frame = self.cap.read()
+
+            if not ret or frame is None:
+                print("Error: Could not read frame")
+                self.cap.release()
+                return False
+
+            self.is_open = True
+
+            print("Mobile camera connected successfully")
+
             return True
-            
-        self.cap = cv2.VideoCapture(self.device_id)
-        
-        if not self.cap.isOpened():
-            print(f"Error: Could not open camera {self.device_id}")
-            return False
-        
-        # Set resolution
-        width = self.config.camera.resolution.get("width", 1280)
-        height = self.config.camera.resolution.get("height", 720)
-        
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        self.cap.set(cv2.CAP_PROP_FPS, self.config.camera.fps)
-        
-        # Warmup - skip initial frames
-        for _ in range(self.config.camera.warmup_frames):
-            self.cap.read()
-            
-        self.is_open = True
-        print(f"Camera {self.device_id} opened: {width}x{height} @ {self.config.camera.fps}fps")
-        return True
     
     def close(self) -> None:
         """Release the camera."""

@@ -122,6 +122,8 @@ class FaceDetector:
         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         # Detect faces
+        cv2.imwrite("debug_frame.jpg", image)
+        print("Saved debug frame")
         locations = face_recognition.face_locations(
             rgb_image,
             number_of_times_to_upsample=num_upsample,
@@ -299,6 +301,14 @@ class FaceMatcher:
         
         min_distance = float(np.min(distances))
         avg_distance = float(np.mean(distances))
+
+        print("DEBUG MATCHER")
+        print("min_distance =", min_distance)
+        print("tolerance =", self.tolerance)
+
+        is_match = min_distance <= self.tolerance
+
+        print("is_match =", is_match)
         
         is_match = min_distance <= self.tolerance
         

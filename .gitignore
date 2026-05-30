@@ -1,5 +1,5 @@
-venv
-.venv
-
-./data/*
-data/biometric.db
+__pycache__/
+*.pyc
+debug_*.jpg
+*.db
+.env

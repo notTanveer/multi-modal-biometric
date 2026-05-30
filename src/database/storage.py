@@ -497,7 +497,68 @@ class DatabaseManager:
             conn.commit()
             
             return cursor.rowcount > 0
-    
+
+    def save_iris_template(
+            self,
+            user_id: str,
+            iris_code: np.ndarray,
+            eye: str,
+            mask: Optional[np.ndarray] = None,
+            quality_score: Optional[float] = None
+    ) -> Optional[int]:
+        """Save iris template for a user."""
+
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            iris_blob = iris_code.tobytes()
+            mask_blob = mask.tobytes() if mask is not None else None
+
+            cursor.execute(
+                """
+                INSERT INTO iris_templates
+                (user_id, iris_code, mask, eye, quality_score)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    iris_blob,
+                    mask_blob,
+                    eye,
+                    quality_score
+                )
+            )
+
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_iris_template(
+            self,
+            user_id: str,
+            eye: str
+    ) -> Optional[np.ndarray]:
+        """Get iris template for a user."""
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT iris_code FROM iris_templates
+            WHERE user_id = ? AND eye = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id, eye)
+        )
+
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return np.frombuffer(row['iris_code'], dtype=np.float32)
     # -------------------- Enrollment Operations --------------------
     
     def enroll_user(

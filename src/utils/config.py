@@ -11,15 +11,15 @@ from pydantic import BaseModel, Field
 
 class CameraConfig(BaseModel):
     device_id: int = 0
-    resolution: dict = Field(default_factory=lambda: {"width": 1280, "height": 720})
+    resolution: dict = Field(default_factory=lambda: {"width": 640, "height": 480})
     fps: int = 30
     warmup_frames: int = 10
 
 
 class FaceRecognitionConfig(BaseModel):
-    detection_model: str = "cnn"
-    encoding_model: str = "large"
-    num_jitters: int = 2
+    detection_model: str = "hog"
+    encoding_model: str = "small"
+    num_jitters: int = 1
     match_tolerance: float = 0.6
     strict_tolerance: float = 0.5
     min_face_size: int = 50

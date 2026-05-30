@@ -158,6 +158,8 @@ class FaceVerificationWorkflow:
             VerificationResult with match details
         """
         start_time = time.time()
+        cv2.imwrite("debug_verify.jpg", frame)
+        print("Frame shape:", frame.shape)
         
         # Get user's template
         template = self._get_user_template(user_id)
@@ -173,7 +175,13 @@ class FaceVerificationWorkflow:
         user_name = user.name if user else user_id
         
         # Detect and encode face
+        cv2.imshow("Debug Frame", frame)
+        cv2.waitKey(1)
+
+        locations = self.face_system.detector.detect_faces(frame)
+        print("LOCATIONS =", len(locations))
         detected_faces = self.face_system.detect_and_encode(frame)
+        print("Faces found:", len(detected_faces))
         if not detected_faces:
             return VerificationResult(
                 success=False,
@@ -181,6 +189,9 @@ class FaceVerificationWorkflow:
                 user_name=user_name,
                 mode=VerificationMode.VERIFY,
                 message="No face detected"
+
+
+
             )
         
         # Get largest face
@@ -188,6 +199,10 @@ class FaceVerificationWorkflow:
         
         # Compare against template
         is_match, distance, _ = self.face_system.verify(frame, template)
+        print("DEBUG")
+        print("is_match =", is_match)
+        print("distance =", distance)
+        print("threshold =", self.face_threshold)
         
         processing_time = (time.time() - start_time) * 1000
         
@@ -250,7 +265,7 @@ class FaceVerificationWorkflow:
         
         processing_time = (time.time() - start_time) * 1000
         
-        if user_id is None or distance > self.face_threshold:
+        if user_id is None or distance >   self.face_threshold:
             self.db.log_verification(
                 user_id=None,
                 verification_type='face',
@@ -356,7 +371,11 @@ class FaceVerificationWorkflow:
                 frame = capture_result.frame
                 
                 # Verify frame
+
                 result = self.verify_frame(frame, user_id)
+
+                print("VERIFY_FRAME RESULT =", result)
+
                 attempts += 1
                 
                 # Track best result
@@ -391,11 +410,12 @@ class FaceVerificationWorkflow:
                 )
                 
                 # Draw face box if detected
-                detect_result = self.face_system.detect_and_encode(frame)
-                if detect_result:
-                    detected_face, _ = detect_result
+                detect_faces = self.face_system.detect_and_encode(frame)
+
+                if detect_faces:
+                    detected_face = self.face_system.get_largest_face(detect_faces)
                     preview_frame = self.face_system.draw_detections(
-                        preview_frame, 
+                        preview_frame,
                         [detected_face]
                     )
                 
@@ -497,7 +517,7 @@ class FaceVerificationWorkflow:
                 attempts += 1
                 
                 # Track best result
-                if best_result is None or result.face_score > best_result.face_score:
+                if best_result is None or result.face_score < best_result.face_score:
                     best_result = result
                 
                 # Create preview
