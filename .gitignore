@@ -3,3 +3,6 @@ __pycache__/
 debug_*.jpg
 *.db
 .env
+.venv
+src/*/__pycache__/*
+CLAUDE.md
