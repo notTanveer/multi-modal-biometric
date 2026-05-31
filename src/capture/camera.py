@@ -50,37 +50,37 @@ class Camera:
         self.is_open = False
 
     def open(self) -> bool:
-            """
-            Open the camera device.
-            """
-
-            if self.is_open:
-                return True
-
-            # MOBILE CAMERA STREAM URL
-            url = "http://172.30.168.162:8080/video"
-
-            print(f"Connecting to mobile camera: {url}")
-
-            self.cap = cv2.VideoCapture(url)
-
-            if not self.cap.isOpened():
-                print("Error: Could not open mobile camera")
-                return False
-
-            # Test frame
-            ret, frame = self.cap.read()
-
-            if not ret or frame is None:
-                print("Error: Could not read frame")
-                self.cap.release()
-                return False
-
-            self.is_open = True
-
-            print("Mobile camera connected successfully")
-
+        """Open the camera device."""
+        if self.is_open:
             return True
+
+        print(f"Opening camera device: {self.device_id}")
+        self.cap = cv2.VideoCapture(self.device_id)
+
+        if not self.cap.isOpened():
+            print(f"Error: Could not open camera {self.device_id}")
+            return False
+
+        # Apply resolution settings
+        res = self.config.camera.resolution
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, res.get("width", 640) if isinstance(res, dict) else res.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res.get("height", 480) if isinstance(res, dict) else res.height)
+        self.cap.set(cv2.CAP_PROP_FPS, self.config.camera.fps)
+
+        # Warmup frames
+        for _ in range(self.config.camera.warmup_frames):
+            self.cap.read()
+
+        # Test frame
+        ret, frame = self.cap.read()
+        if not ret or frame is None:
+            print("Error: Could not read frame from camera")
+            self.cap.release()
+            return False
+
+        self.is_open = True
+        print(f"Camera {self.device_id} opened successfully")
+        return True
     
     def close(self) -> None:
         """Release the camera."""

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Optional
 import cv2
 import numpy as np
+import face_recognition
 
 from ..capture.camera import Camera, CaptureResult
 from ..face.recognition import (
@@ -152,8 +153,6 @@ class FaceEnrollmentWorkflow:
         if session.captured_samples:
             # Compare with existing samples to ensure diversity
             for existing in session.captured_samples:
-                # Calculate distance between encodings
-                import face_recognition
                 distance = float(face_recognition.face_distance([existing.encoding], detected_face.encoding)[0])
                 
                 # If too similar (distance < 0.1), it's probably the same pose
@@ -316,11 +315,9 @@ class FaceEnrollmentWorkflow:
                 frame = result.frame
                 current_time = time.time()
                 auto_capture = (current_time - last_capture_time) >= self.sample_interval
-                print("AUTO CAPTURE CHECK:", auto_capture, "interval =", self.sample_interval)
-                
+
                 # Try to detect faces for preview
                 detected_faces = self.face_system.detect_and_encode(frame)
-                print("ENROLLMENT DEBUG: faces =", len(detected_faces))
                 
                 if detected_faces:
                     largest_face = self.face_system.get_largest_face(detected_faces)

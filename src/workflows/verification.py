@@ -158,9 +158,7 @@ class FaceVerificationWorkflow:
             VerificationResult with match details
         """
         start_time = time.time()
-        cv2.imwrite("debug_verify.jpg", frame)
-        print("Frame shape:", frame.shape)
-        
+
         # Get user's template
         template = self._get_user_template(user_id)
         if template is None:
@@ -175,13 +173,7 @@ class FaceVerificationWorkflow:
         user_name = user.name if user else user_id
         
         # Detect and encode face
-        cv2.imshow("Debug Frame", frame)
-        cv2.waitKey(1)
-
-        locations = self.face_system.detector.detect_faces(frame)
-        print("LOCATIONS =", len(locations))
         detected_faces = self.face_system.detect_and_encode(frame)
-        print("Faces found:", len(detected_faces))
         if not detected_faces:
             return VerificationResult(
                 success=False,
@@ -199,10 +191,6 @@ class FaceVerificationWorkflow:
         
         # Compare against template
         is_match, distance, _ = self.face_system.verify(frame, template)
-        print("DEBUG")
-        print("is_match =", is_match)
-        print("distance =", distance)
-        print("threshold =", self.face_threshold)
         
         processing_time = (time.time() - start_time) * 1000
         
@@ -370,12 +358,7 @@ class FaceVerificationWorkflow:
                 
                 frame = capture_result.frame
                 
-                # Verify frame
-
                 result = self.verify_frame(frame, user_id)
-
-                print("VERIFY_FRAME RESULT =", result)
-
                 attempts += 1
                 
                 # Track best result
@@ -409,19 +392,9 @@ class FaceVerificationWorkflow:
                     2
                 )
                 
-                # Draw face box if detected
-                detect_faces = self.face_system.detect_and_encode(frame)
-
-                if detect_faces:
-                    detected_face = self.face_system.get_largest_face(detect_faces)
-                    preview_frame = self.face_system.draw_detections(
-                        preview_frame,
-                        [detected_face]
-                    )
-                
                 if show_preview:
                     cv2.imshow("Face Verification", preview_frame)
-                    key = cv2.waitKey(100) & 0xFF
+                    key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
                         return VerificationResult(
                             success=False,
@@ -541,17 +514,9 @@ class FaceVerificationWorkflow:
                     2
                 )
                 
-                # Draw face box if detected
-                detect_faces = self.face_system.detect_and_encode(frame)
-                if detect_faces:
-                    preview_frame = self.face_system.draw_detections(
-                        preview_frame,
-                        detect_faces
-                    )
-                
                 if show_preview:
                     cv2.imshow("Face Identification", preview_frame)
-                    key = cv2.waitKey(100) & 0xFF
+                    key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
                         return VerificationResult(
                             success=False,

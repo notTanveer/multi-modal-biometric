@@ -8,16 +8,16 @@ system:
 camera:
   device_id: 0                    # Default webcam
   resolution:
-    width: 1280
-    height: 720
+    width: 640
+    height: 480
   fps: 30
-  warmup_frames: 10               # Frames to skip for camera warmup
+  warmup_frames: 5                # Frames to skip for camera warmup
 
 # Face recognition settings
 face_recognition:
-  detection_model: "cnn"          # "cnn" (GPU) or "hog" (CPU)
-  encoding_model: "large"         # "large" (accurate) or "small" (fast)
-  num_jitters: 2                  # Re-sampling for encoding
+  detection_model: "hog"          # "cnn" (GPU) or "hog" (CPU)
+  encoding_model: "small"         # "large" (accurate) or "small" (fast)
+  num_jitters: 1                  # Re-sampling for encoding
   match_tolerance: 0.6            # Distance threshold (lower = stricter)
   strict_tolerance: 0.5           # For high-security mode
   min_face_size: 50               # Minimum face size in pixels
