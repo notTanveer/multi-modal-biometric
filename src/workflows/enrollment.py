@@ -207,46 +207,67 @@ class FaceEnrollmentWorkflow:
         if not result.success:
             return result
 
-        print("\nCapturing iris templates...")
-
-        iris_capture = self.camera.read_frame()
-
-        if iris_capture.success and iris_capture.frame is not None:
-            eye_regions = self.iris_system.extract_eye_regions(iris_capture.frame)
-
-            if eye_regions:
-                left_crop = self.iris_system.crop_eye(
-                    iris_capture.frame,
-                    eye_regions["left_eye"]
-                )
-
-                right_crop = self.iris_system.crop_eye(
-                    iris_capture.frame,
-                    eye_regions["right_eye"]
-                )
-
-                left_template = self.iris_system.generate_iris_template(left_crop)
-                right_template = self.iris_system.generate_iris_template(right_crop)
-
-                self.db.save_iris_template(
-                    session.user_id,
-                    left_template,
-                    "left"
-                )
-
-                self.db.save_iris_template(
-                    session.user_id,
-                    right_template,
-                    "right"
-                )
-
-                print("✓ Iris templates saved")
-            else:
-                print("⚠ Iris capture failed: Eyes not detected")
-        else:
-            print("⚠ Iris capture failed: Could not read camera frame")
+        self._capture_iris_templates(session.user_id)
 
         return result
+
+    def _capture_iris_templates(self, user_id: str) -> bool:
+        """Capture, quality-gate, and average N iris samples per eye.
+
+        Collects up to ``iris.num_samples`` good-quality crops for each eye over
+        a short burst of frames, averages them into one robust template per eye
+        (mirroring the face-template averaging), and replaces any stale rows.
+
+        Returns True if both eyes were stored.
+        """
+        num_samples = self.config.iris.num_samples
+        print(f"\nCapturing iris templates ({num_samples} samples/eye)...")
+
+        left_samples: list[np.ndarray] = []
+        right_samples: list[np.ndarray] = []
+
+        # Allow extra frames so blinks / blurry frames don't starve us.
+        max_frames = num_samples * 6
+        for _ in range(max_frames):
+            if len(left_samples) >= num_samples and len(right_samples) >= num_samples:
+                break
+
+            capture = self.camera.read_frame()
+            if not capture.success or capture.frame is None:
+                continue
+
+            eyes = self.iris_system.extract_eye_regions(capture.frame)
+            if not eyes:
+                continue
+
+            for eye_name, bucket in (("left_eye", left_samples), ("right_eye", right_samples)):
+                if len(bucket) >= num_samples:
+                    continue
+                crop = self.iris_system.crop_eye(capture.frame, eyes[eye_name])
+                if self.iris_system.is_acceptable(crop):
+                    bucket.append(self.iris_system.generate_iris_template(crop))
+
+        if not left_samples or not right_samples:
+            print("⚠ Iris capture failed: could not collect quality eye samples")
+            return False
+
+        left_template = self.iris_system.average_templates(left_samples)
+        right_template = self.iris_system.average_templates(right_samples)
+
+        # Replace any prior templates so verification can't pick a stale row.
+        self.db.delete_iris_template(user_id)
+
+        self.db.save_iris_template(
+            user_id, left_template, "left",
+            quality_score=float(len(left_samples)),
+        )
+        self.db.save_iris_template(
+            user_id, right_template, "right",
+            quality_score=float(len(right_samples)),
+        )
+
+        print(f"✓ Iris templates saved (L:{len(left_samples)} R:{len(right_samples)} samples)")
+        return True
 
 
     

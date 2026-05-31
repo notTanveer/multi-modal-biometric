@@ -43,10 +43,32 @@ class EnrollmentConfig(BaseModel):
     require_quality_check: bool = True
 
 
+class LivenessConfig(BaseModel):
+    """Blink / eye-aspect-ratio anti-spoof settings."""
+    ear_threshold: float = 0.21       # Eye-aspect-ratio below this = eye closed
+    min_blinks: int = 1               # Blinks required to consider input "live"
+    timeout_seconds: float = 6.0      # Max time to wait for a blink
+
+
 class VerificationConfig(BaseModel):
     max_attempts: int = 3
     timeout_seconds: int = 30
-    require_liveness: bool = False
+    require_liveness: bool = True
+
+
+class IrisConfig(BaseModel):
+    """Iris (eye-region appearance) recognition settings."""
+    threshold: float = 0.65           # Distance threshold (lower = stricter)
+    num_samples: int = 3              # Eye samples to average at enrollment
+    min_sharpness: float = 15.0       # Laplacian-variance gate for eye crops
+    metric: str = "rmse"              # "rmse" or "correlation"
+
+
+class FusionConfig(BaseModel):
+    """Score-level fusion settings for multi-modal decision."""
+    face_weight: float = 0.6
+    iris_weight: float = 0.4
+    combined_threshold: float = 0.6   # On the normalized [0,1] weighted score
 
 
 class SystemConfig(BaseModel):
@@ -64,6 +86,9 @@ class Config(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     enrollment: EnrollmentConfig = Field(default_factory=EnrollmentConfig)
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
+    iris: IrisConfig = Field(default_factory=IrisConfig)
+    fusion: FusionConfig = Field(default_factory=FusionConfig)
+    liveness: LivenessConfig = Field(default_factory=LivenessConfig)
 
 
 def get_project_root() -> Path:

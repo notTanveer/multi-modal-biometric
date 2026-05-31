@@ -44,4 +44,23 @@ enrollment:
 verification:
   max_attempts: 3
   timeout_seconds: 30
-  require_liveness: false         # Liveness detection (future feature)
+  require_liveness: true          # Blink-based anti-spoof (see liveness section)
+
+# Iris (eye-region appearance) recognition settings
+iris:
+  threshold: 0.65                 # Distance threshold (lower = stricter)
+  num_samples: 3                  # Eye samples averaged per eye at enrollment
+  min_sharpness: 15.0             # Laplacian-variance gate for eye crops
+  metric: "rmse"                  # "rmse" or "correlation"
+
+# Score-level fusion (multi-modal decision)
+fusion:
+  face_weight: 0.6                # Must sum to 1.0 with iris_weight
+  iris_weight: 0.4
+  combined_threshold: 0.6         # On normalized [0,1] weighted score
+
+# Liveness / anti-spoof (blink detection)
+liveness:
+  ear_threshold: 0.21             # Eye-aspect-ratio below this = eye closed
+  min_blinks: 1                   # Blinks required within the capture window
+  timeout_seconds: 6.0            # Max time to wait for a blink
