@@ -211,6 +211,48 @@ class FaceEnrollmentWorkflow:
 
         return result
 
+    def store_enrollment(
+        self,
+        session: EnrollmentSession,
+        left_iris: Optional[np.ndarray] = None,
+        right_iris: Optional[np.ndarray] = None,
+        metadata: Optional[dict] = None,
+    ) -> EnrollmentResult:
+        """Persist a completed session using *pre-collected* iris templates.
+
+        This is the non-interactive counterpart to ``finalize_enrollment``: the
+        caller (e.g. the GUI driving capture frame-by-frame) supplies the
+        averaged per-eye iris templates instead of this workflow reading the
+        camera itself.
+        """
+        if not session.captured_samples:
+            return EnrollmentResult(success=False, message="No samples captured")
+
+        if session.samples_collected < 3:
+            return EnrollmentResult(
+                success=False,
+                message=f"Insufficient samples: {session.samples_collected}/3 minimum",
+            )
+
+        encodings = [sample.encoding for sample in session.captured_samples]
+
+        result = self.db.enroll_user(
+            user_id=session.user_id,
+            name=session.name,
+            face_encodings=encodings,
+            quality_scores=session.quality_scores,
+            metadata=metadata,
+        )
+        if not result.success:
+            return result
+
+        if left_iris is not None and right_iris is not None:
+            self.db.delete_iris_template(session.user_id)
+            self.db.save_iris_template(session.user_id, left_iris, "left")
+            self.db.save_iris_template(session.user_id, right_iris, "right")
+
+        return result
+
     def _capture_iris_templates(self, user_id: str) -> bool:
         """Capture, quality-gate, and average N iris samples per eye.
 
