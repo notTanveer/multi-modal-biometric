@@ -498,6 +498,34 @@ class DatabaseManager:
             
             return cursor.rowcount > 0
 
+    def delete_iris_template(self, user_id: str, eye: Optional[str] = None) -> bool:
+        """Delete iris template(s) for a user.
+
+        Args:
+            user_id: User identifier
+            eye: Specific eye ('left'/'right') or None for all of the user's
+
+        Returns:
+            True if any template row was deleted
+        """
+        with self._lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            if eye is None:
+                cursor.execute(
+                    "DELETE FROM iris_templates WHERE user_id = ?",
+                    (user_id,)
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM iris_templates WHERE user_id = ? AND eye = ?",
+                    (user_id, eye)
+                )
+            conn.commit()
+
+            return cursor.rowcount > 0
+
     def save_iris_template(
             self,
             user_id: str,

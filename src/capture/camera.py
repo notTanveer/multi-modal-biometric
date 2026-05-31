@@ -2,6 +2,8 @@
 Camera capture module for face and iris image acquisition.
 """
 
+import logging
+
 import cv2
 import numpy as np
 from typing import Optional, Tuple, Generator
@@ -9,6 +11,8 @@ from dataclasses import dataclass
 import time
 
 from src.utils.config import get_config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,11 +58,11 @@ class Camera:
         if self.is_open:
             return True
 
-        print(f"Opening camera device: {self.device_id}")
+        logger.debug("Opening camera device: %s", self.device_id)
         self.cap = cv2.VideoCapture(self.device_id)
 
         if not self.cap.isOpened():
-            print(f"Error: Could not open camera {self.device_id}")
+            logger.error("Could not open camera %s", self.device_id)
             return False
 
         # Apply resolution settings
@@ -74,12 +78,12 @@ class Camera:
         # Test frame
         ret, frame = self.cap.read()
         if not ret or frame is None:
-            print("Error: Could not read frame from camera")
+            logger.error("Could not read frame from camera")
             self.cap.release()
             return False
 
         self.is_open = True
-        print(f"Camera {self.device_id} opened successfully")
+        logger.debug("Camera %s opened successfully", self.device_id)
         return True
     
     def close(self) -> None:
@@ -87,7 +91,7 @@ class Camera:
         if self.cap is not None:
             self.cap.release()
             self.is_open = False
-            print("Camera closed")
+            logger.debug("Camera closed")
     
     def read_frame(self) -> CaptureResult:
         """

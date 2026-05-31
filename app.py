@@ -1,362 +1,305 @@
+"""Modern desktop GUI for the multi-modal biometric authentication system.
 
-import tkinter as tk
-from tkinter import messagebox, scrolledtext
-import subprocess
+Built on CustomTkinter with an embedded live camera preview. Unlike the previous
+version, this app talks to the workflows **in-process** through
+``BiometricService`` and decides outcomes from structured result objects
+(``result.success``) — not by string-matching subprocess stdout. That removes the
+old security bug where a face-pass / iris-fail was reported as authenticated.
+
+Guided capture steps (face/iris/enroll) still open their own OpenCV windows with
+alignment overlays and the blink-liveness prompt; the embedded preview is paused
+and the camera released while an operation runs, then resumed afterwards.
+"""
+
+import logging
+import queue
 import threading
 
-from src.database.storage import DatabaseManager
+import cv2
+import customtkinter as ctk
+from PIL import Image
+
+from src.workflows.service import BiometricService
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+PREVIEW_SIZE = (480, 360)
+
+COLOR_OK = "#2fa572"
+COLOR_FAIL = "#d9534f"
+COLOR_BUSY = "#3b8ed0"
+COLOR_IDLE = "#4a4a4a"
 
 
-class BiometricApp:
+class BiometricApp(ctk.CTk):
 
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Multi-Modal Biometric Authentication System")
-        self.root.geometry("900x700")
+    def __init__(self):
+        super().__init__()
 
-        self.build_ui()
+        self.title("Multi-Modal Biometric Authentication System")
+        self.geometry("1040x680")
+        self.minsize(940, 620)
 
-        self.result_label = tk.Label(
-            self.root,
-            text="",
-            font=("Arial", 28, "bold")
+        self.service = BiometricService()
+
+        self.ui_queue: queue.Queue = queue.Queue()
+        self.busy = False
+        self.preview_active = True
+        self._preview_image = None  # keep a reference so it isn't GC'd
+
+        self._build_ui()
+        self._update_preview()
+        self.after(100, self._process_queue)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
+    def _build_ui(self):
+        self.grid_columnconfigure(0, weight=0)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ---- Left: live preview ----
+        left = ctk.CTkFrame(self, corner_radius=12)
+        left.grid(row=0, column=0, padx=16, pady=16, sticky="nsew")
+
+        ctk.CTkLabel(left, text="● Live Camera", font=("Arial", 16, "bold")).pack(pady=(14, 6))
+        self.preview_label = ctk.CTkLabel(left, text="Starting camera…", width=PREVIEW_SIZE[0], height=PREVIEW_SIZE[1])
+        self.preview_label.pack(padx=14, pady=8)
+
+        self.status_badge = ctk.CTkLabel(
+            left, text="IDLE", font=("Arial", 26, "bold"),
+            fg_color=COLOR_IDLE, corner_radius=10, height=64,
         )
-        self.result_label.pack(pady=10)
+        self.status_badge.pack(fill="x", padx=14, pady=(8, 6))
 
-    def build_ui(self):
+        self.breakdown = ctk.CTkLabel(left, text="face — · iris — · combined —", font=("Arial", 13))
+        self.breakdown.pack(pady=(0, 14))
 
-        title = tk.Label(
-            self.root,
-            text="Multi-Modal Biometric Authentication System",
-            font=("Arial", 16, "bold")
-        )
-        title.pack(pady=10)
+        # ---- Right: controls + log ----
+        right = ctk.CTkFrame(self, corner_radius=12)
+        right.grid(row=0, column=1, padx=(0, 16), pady=16, sticky="nsew")
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(7, weight=1)
 
-        tk.Label(self.root, text="User ID").pack()
+        ctk.CTkLabel(
+            right, text="Multi-Modal Biometric Auth", font=("Arial", 20, "bold")
+        ).grid(row=0, column=0, padx=16, pady=(16, 12), sticky="w")
 
-        self.user_id = tk.Entry(self.root, width=40)
-        self.user_id.pack(pady=5)
+        self.user_id = ctk.CTkEntry(right, placeholder_text="User ID")
+        self.user_id.grid(row=1, column=0, padx=16, pady=6, sticky="ew")
 
-        tk.Label(self.root, text="Name").pack()
+        self.name = ctk.CTkEntry(right, placeholder_text="Name (for enrollment)")
+        self.name.grid(row=2, column=0, padx=16, pady=6, sticky="ew")
 
-        self.name = tk.Entry(self.root, width=40)
-        self.name.pack(pady=5)
+        btns = ctk.CTkFrame(right, fg_color="transparent")
+        btns.grid(row=3, column=0, padx=12, pady=10, sticky="ew")
+        btns.grid_columnconfigure((0, 1), weight=1)
 
-        button_frame = tk.Frame(self.root)
-        button_frame.pack(pady=15)
+        self.buttons: list[ctk.CTkButton] = []
 
-        tk.Button(
-            button_frame,
-            text="Enroll User",
-            width=18,
-            command=self.enroll_user
-        ).grid(row=0, column=0, padx=5, pady=5)
+        def add_btn(parent, text, cmd, row, col, **kw):
+            b = ctk.CTkButton(parent, text=text, command=cmd, height=40, **kw)
+            b.grid(row=row, column=col, padx=6, pady=6, sticky="ew")
+            self.buttons.append(b)
+            return b
 
-        tk.Button(
-            button_frame,
-            text="Verify User",
-            width=18,
-            command=self.verify_user
-        ).grid(row=0, column=1, padx=5, pady=5)
+        add_btn(btns, "Enroll User", self.enroll_user, 0, 0)
+        add_btn(btns, "Verify (Face)", self.verify_user, 0, 1)
+        add_btn(btns, "Authenticate", self.authenticate_user, 1, 0,
+                fg_color=COLOR_OK, hover_color="#268a5e")
+        add_btn(btns, "List Users", self.list_users, 1, 1)
+        add_btn(btns, "Delete User", self.delete_user, 2, 0,
+                fg_color=COLOR_FAIL, hover_color="#b94440")
+        add_btn(btns, "Clear Output", self.clear_output, 2, 1, fg_color="gray30")
 
-        tk.Button(
-            button_frame,
-            text="Authenticate",
-            width=18,
-            command=self.authenticate_user
-        ).grid(row=1, column=0, padx=5, pady=5)
+        ctk.CTkLabel(right, text="System Output", font=("Arial", 14, "bold")).grid(
+            row=6, column=0, padx=16, pady=(8, 2), sticky="w")
 
-        tk.Button(
-            button_frame,
-            text="List Users",
-            width=18,
-            command=self.list_users
-        ).grid(row=1, column=1, padx=5, pady=5)
+        self.output = ctk.CTkTextbox(right, font=("Courier", 12))
+        self.output.grid(row=7, column=0, padx=16, pady=(0, 16), sticky="nsew")
 
-        tk.Button(
-            button_frame,
-            text="Delete User",
-            width=18,
-            command=self.delete_user
-        ).grid(row=2, column=0, padx=5, pady=5)
+    # ------------------------------------------------------------------
+    # Live preview loop (main thread)
+    # ------------------------------------------------------------------
+    def _update_preview(self):
+        if self.preview_active and not self.busy:
+            try:
+                result = self.service.camera.read_frame()
+                if result.success and result.frame is not None:
+                    rgb = cv2.cvtColor(result.frame, cv2.COLOR_BGR2RGB)
+                    pil = Image.fromarray(rgb).resize(PREVIEW_SIZE)
+                    self._preview_image = ctk.CTkImage(light_image=pil, dark_image=pil, size=PREVIEW_SIZE)
+                    self.preview_label.configure(image=self._preview_image, text="")
+            except Exception:  # camera hiccup — keep the loop alive
+                logging.debug("preview frame skipped", exc_info=True)
+            self.after(33, self._update_preview)
+        else:
+            # Paused (an operation owns the camera); poll less often.
+            self.after(150, self._update_preview)
 
-        tk.Button(
-            button_frame,
-            text="Clear Output",
-            width=18,
-            command=self.clear_output
-        ).grid(row=2, column=1, padx=5, pady=5)
+    # ------------------------------------------------------------------
+    # Worker plumbing
+    # ------------------------------------------------------------------
+    def write(self, text: str):
+        self.output.insert("end", text + "\n")
+        self.output.see("end")
 
-        tk.Label(
-            self.root,
-            text="System Output"
-        ).pack()
+    def _set_busy(self, busy: bool):
+        self.busy = busy
+        state = "disabled" if busy else "normal"
+        for b in self.buttons:
+            b.configure(state=state)
+        if busy:
+            # Release the camera so the workflow can take it over cleanly.
+            self.preview_active = False
+            try:
+                self.service.camera.close()
+            except Exception:
+                pass
+        else:
+            self.preview_active = True
 
-        self.output = scrolledtext.ScrolledText(
-            self.root,
-            width=100,
-            height=20
-        )
-        self.output.pack(
-            padx=10,
-            pady=10
-        )
-
-    def write(self, text):
-        self.output.insert(
-            tk.END,
-            text + "\n"
-        )
-        self.output.see(tk.END)
-
-    def run_command(self, command):
-
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True
-            )
-
-            if result.stdout:
-                self.write(result.stdout)
-
-            if result.stderr:
-                self.write(result.stderr)
-
-        except Exception as e:
-            self.write(f"Error: {e}")
-
-    def run_authentication(self, command):
-
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True
-            )
-
-            output = result.stdout + result.stderr
-
-            self.write(output)
-
-            if (
-                    "Authentication Successful" in output
-                    or "success=np.True_" in output
-                    or "face_success=True" in output
-            ):
-                self.result_label.config(
-                    text="✓ AUTHENTICATED USER",
-                    fg="green"
-                )
-            else:
-                self.result_label.config(
-                    text="✗ NOT AUTHENTICATED",
-                    fg="red"
-                )
-
-        except Exception as e:
-
-            self.write(f"Error: {e}")
-
-            self.result_label.config(
-                text="✗ ERROR",
-                fg="red"
-            )
-
-    def enroll_user(self):
-
-        user_id = self.user_id.get().strip()
-        name = self.name.get().strip()
-
-        if not user_id or not name:
-            messagebox.showerror(
-                "Error",
-                "Enter User ID and Name"
-            )
+    def _run(self, fn, *args):
+        """Run a blocking service call on a worker thread."""
+        if self.busy:
             return
+        self._set_busy(True)
 
-        self.write(
-            f"\n===== ENROLLING {user_id} =====\n"
-        )
+        def worker():
+            try:
+                payload = fn(*args)
+                self.ui_queue.put(("result", payload))
+            except Exception as exc:  # surface, don't crash the UI
+                logging.exception("operation failed")
+                self.ui_queue.put(("error", str(exc)))
 
-        command = [
-            "python",
-            "demo/face_demo.py",
-            "enroll",
-            user_id,
-            name,
-            "-s",
-            "3"
-        ]
+        threading.Thread(target=worker, daemon=True).start()
 
-        threading.Thread(
-            target=self.run_command,
-            args=(command,),
-            daemon=True
-        ).start()
+    def _process_queue(self):
+        try:
+            while True:
+                kind, payload = self.ui_queue.get_nowait()
+                if kind == "error":
+                    self.write(f"Error: {payload}")
+                    self._set_status("✗ ERROR", COLOR_FAIL)
+                    self._set_busy(False)
+                elif kind == "result":
+                    handler, value = payload
+                    handler(value)
+                    self._set_busy(False)
+        except queue.Empty:
+            pass
+        self.after(100, self._process_queue)
+
+    def _set_status(self, text: str, color: str):
+        self.status_badge.configure(text=text, fg_color=color)
+
+    def _set_breakdown(self, face=None, iris=None, combined=None):
+        def fmt(v):
+            return f"{v:.0f}%" if isinstance(v, (int, float)) else "—"
+        self.breakdown.configure(
+            text=f"face {fmt(face)} · iris {fmt(iris)} · combined {fmt(combined)}")
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+    def enroll_user(self):
+        uid = self.user_id.get().strip()
+        name = self.name.get().strip()
+        if not uid or not name:
+            self.write("Enter both User ID and Name to enroll.")
+            return
+        self.write(f"\n===== ENROLLING {uid} =====")
+        self._set_status("ENROLLING…", COLOR_BUSY)
+        self._run(lambda: (self._on_enroll, self.service.enroll(uid, name)))
+
+    def _on_enroll(self, result):
+        self.write(result.message)
+        self._set_status("✓ ENROLLED" if result.success else "✗ FAILED",
+                         COLOR_OK if result.success else COLOR_FAIL)
 
     def verify_user(self):
-
-        user_id = self.user_id.get().strip()
-
-        if not user_id:
-            messagebox.showerror(
-                "Error",
-                "Enter User ID"
-            )
+        uid = self.user_id.get().strip()
+        if not uid:
+            self.write("Enter a User ID to verify.")
             return
+        self.write(f"\n===== VERIFYING (face) {uid} =====")
+        self._set_status("VERIFYING…", COLOR_BUSY)
+        self._run(lambda: (self._on_verify, self.service.verify_face(uid)))
 
-        self.write(
-            f"\n===== VERIFYING {user_id} =====\n"
-        )
-
-        command = [
-            "python",
-            "demo/face_demo.py",
-            "verify",
-            user_id
-        ]
-
-        threading.Thread(
-            target=self.run_command,
-            args=(command,),
-            daemon=True
-        ).start()
+    def _on_verify(self, result):
+        self.write(result.message)
+        self._set_breakdown(face=result.confidence)
+        self._set_status("✓ VERIFIED" if result.success else "✗ NOT VERIFIED",
+                         COLOR_OK if result.success else COLOR_FAIL)
 
     def authenticate_user(self):
-
-        user_id = self.user_id.get().strip()
-
-        if not user_id:
-            messagebox.showerror(
-                "Error",
-                "Enter User ID"
-            )
+        uid = self.user_id.get().strip()
+        if not uid:
+            self.write("Enter a User ID to authenticate.")
             return
+        self.write(f"\n===== MULTI-MODAL AUTHENTICATION ({uid}) =====")
+        self._set_status("AUTHENTICATING…", COLOR_BUSY)
+        self._run(lambda: (self._on_authenticate, self.service.authenticate(uid)))
 
-        self.result_label.config(
-            text="AUTHENTICATING...",
-            fg="blue"
-        )
-
+    def _on_authenticate(self, result):
+        self.write(result.message)
         self.write(
-            f"\n===== MULTI-MODAL AUTHENTICATION ({user_id}) =====\n"
+            f"  face_ok={result.face_success} iris_ok={result.iris_success} "
+            f"combined={result.combined_confidence:.1f}%")
+        self._set_breakdown(
+            face=result.face_confidence,
+            iris=result.iris_confidence,
+            combined=result.combined_confidence,
         )
-
-        command = [
-            "python",
-            "test_fusionauth.py",
-            user_id
-        ]
-
-        threading.Thread(
-            target=self.run_authentication,
-            args=(command,),
-            daemon=True
-        ).start()
+        # Verdict comes straight from the structured result — no string scraping.
+        if result.success:
+            self._set_status("✓ AUTHENTICATED", COLOR_OK)
+        else:
+            self._set_status("✗ DENIED", COLOR_FAIL)
 
     def list_users(self):
+        self.write("\n===== ENROLLED USERS =====")
+        self._run(lambda: (self._on_list, self.service.list_users()))
 
-        try:
-
-            db = DatabaseManager()
-            db.initialize()
-
-            users = db.list_users(
-                active_only=False
-            )
-
-            self.write(
-                "\n===== ENROLLED USERS ====="
-            )
-
-            if not users:
-                self.write(
-                    "No users found"
-                )
-                return
-
-            for user in users:
-                self.write(
-                    f"{user.user_id} -> {user.name}"
-                )
-
-        except Exception as e:
-            self.write(
-                f"Error: {e}"
-            )
+    def _on_list(self, users):
+        if not users:
+            self.write("No users found")
+            return
+        for u in users:
+            self.write(f"{u.user_id} -> {u.name}")
 
     def delete_user(self):
-
-        user_id = self.user_id.get().strip()
-
-        if not user_id:
-            messagebox.showerror(
-                "Error",
-                "Enter User ID"
-            )
+        uid = self.user_id.get().strip()
+        if not uid:
+            self.write("Enter a User ID to delete.")
             return
+        self._run(lambda: (self._on_delete, self.service.delete_user(uid)))
 
-        confirm = messagebox.askyesno(
-            "Confirm Delete",
-            f"Delete user '{user_id}'?"
-        )
-
-        if not confirm:
-            return
-
-        try:
-
-            db = DatabaseManager()
-            db.initialize()
-
-            try:
-                db.delete_face_template(
-                    user_id
-                )
-            except:
-                pass
-
-            try:
-                db.delete_iris_template(
-                    user_id
-                )
-            except:
-                pass
-
-            try:
-                db.delete_user(
-                    user_id
-                )
-            except:
-                pass
-
-            self.write(
-                f"Deleted user: {user_id}"
-            )
-
-        except Exception as e:
-            self.write(
-                f"Error: {e}"
-            )
+    def _on_delete(self, outcome):
+        ok, message = outcome
+        self.write(message)
 
     def clear_output(self):
+        self.output.delete("1.0", "end")
+        self._set_status("IDLE", COLOR_IDLE)
+        self._set_breakdown()
 
-        self.output.delete(
-            "1.0",
-            tk.END
-        )
-
-        self.result_label.config(
-            text=""
-        )
+    # ------------------------------------------------------------------
+    def _on_close(self):
+        self.preview_active = False
+        try:
+            self.service.camera.close()
+        except Exception:
+            pass
+        self.destroy()
 
 
 if __name__ == "__main__":
-
-    root = tk.Tk()
-
-    app = BiometricApp(root)
-
-    root.mainloop()
+    app = BiometricApp()
+    app.mainloop()

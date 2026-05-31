@@ -2,6 +2,8 @@
 Face recognition module - detection, encoding, and matching.
 """
 
+import logging
+
 import cv2
 import numpy as np
 from typing import List, Optional, Tuple
@@ -9,6 +11,8 @@ from dataclasses import dataclass, field
 import face_recognition
 
 from src.utils.config import get_config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,7 +105,7 @@ class FaceDetector:
         self.model = model or self.config.face_recognition.detection_model
         self.min_face_size = self.config.face_recognition.min_face_size
         
-        print(f"FaceDetector initialized with model: {self.model}")
+        logger.debug("FaceDetector initialized with model: %s", self.model)
     
     def detect_faces(
         self,
@@ -171,7 +175,7 @@ class FaceEncoder:
         self.num_jitters = self.config.face_recognition.num_jitters
         self.model = self.config.face_recognition.encoding_model
         
-        print(f"FaceEncoder initialized: jitters={self.num_jitters}, model={self.model}")
+        logger.debug("FaceEncoder initialized: jitters=%s, model=%s", self.num_jitters, self.model)
     
     def encode_face(
         self,
@@ -255,7 +259,7 @@ class FaceMatcher:
         self.config = get_config()
         self.tolerance = tolerance or self.config.face_recognition.match_tolerance
         
-        print(f"FaceMatcher initialized: tolerance={self.tolerance}")
+        logger.debug("FaceMatcher initialized: tolerance=%s", self.tolerance)
     
     def compare(
         self,
@@ -357,7 +361,7 @@ class FaceRecognitionSystem:
         self.encoder = FaceEncoder()
         self.matcher = FaceMatcher()
         
-        print("FaceRecognitionSystem initialized")
+        logger.debug("FaceRecognitionSystem initialized")
     
     def detect_and_encode(
         self,
