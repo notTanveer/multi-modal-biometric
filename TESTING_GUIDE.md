@@ -1,6 +1,8 @@
 # Testing Guide - Multi-Modal Biometric System
 
-This guide will walk you through testing the face recognition system end-to-end.
+This guide walks you through testing the system end-to-end — both the desktop
+GUI and the CLI. The CLI sections below focus on the face factor; the GUI and
+the multi-modal sections cover the full face + iris + liveness flow.
 
 ## ✅ System Status
 
@@ -8,13 +10,47 @@ This guide will walk you through testing the face recognition system end-to-end.
 
 ```
 ✅ Camera interface working
-✅ Face detection/encoding working  
+✅ Face detection/encoding working
+✅ Iris (eye-region) recognition working
+✅ Blink-based liveness working
+✅ Weighted fusion + AND gate working
 ✅ Database storage working
-✅ Enrollment workflow ready
-✅ Verification workflow ready
-✅ Identification workflow ready
+✅ Enrollment / verification / identification workflows ready
+✅ CustomTkinter GUI (in-process, frame-driven)
 ✅ CLI commands functional
 ```
+
+## 🖥️ GUI Testing (recommended first)
+
+```bash
+python app.py
+```
+
+1. **Enroll:** type a User ID + Name, click **Enroll User**. Watch Step 1/2
+   (face samples) then Step 2/2 (iris samples). Badge → **ENROLLED**.
+2. **Authenticate:** type the User ID, click **Authenticate**. Step 1/2 face
+   passes, then Step 2/2 asks you to **blink**. Badge → **✓ AUTHENTICATED**
+   with a face/iris/combined breakdown.
+3. **Negative — wrong person:** authenticate as an enrolled ID while someone
+   else is in frame → **✗ DENIED**.
+4. **Negative — face-pass / iris-fail:** this must show **✗ DENIED** (it was a
+   historical bug where it showed "authenticated").
+5. **Negative — liveness:** hold a static photo of the enrolled face to the
+   camera → iris step never blinks → **✗ DENIED** after the liveness timeout.
+
+> The preview slows to ~5 fps during Verify/Authenticate (per-frame detection on
+> the UI thread). That is expected — not a hang. **Blink deliberately.**
+
+## 🔗 Multi-Modal CLI Testing
+
+```bash
+python test_fusionauth.py sahil
+```
+
+Runs face → iris (with blink liveness) → weighted fusion. The printed
+`MultiModalVerificationResult` should show `success=True` only when both factors
+pass and `combined_confidence` clears the threshold; face-pass/iris-fail returns
+`success=False`.
 
 ## 🔧 Pre-Testing Checklist
 

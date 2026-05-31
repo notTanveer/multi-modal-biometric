@@ -17,6 +17,32 @@ This document outlines the implementation plan for a **multi-modal biometric aut
 
 ---
 
+## 1.1 Implementation Status (As-Built)
+
+> This document captures the original design intent. The shipped system diverges
+> from the plan in a few important ways — read this section alongside the rest.
+
+- **Iris recognition is appearance-based, not open-iris/NIR.** The implemented
+  iris factor (`src/iris/recognition.py`) locates eyes via
+  `face_recognition.face_landmarks`, crops them symmetrically, normalizes with
+  CLAHE, and matches flattened 64×64 feature vectors (RMSE or normalized
+  correlation). It is not the open-iris NIR iris-code pipeline. Treat it as a
+  second factor (~70–95% accuracy), not a standalone high-security iris system.
+- **Fusion is weighted score-level + AND gate, config-driven.** Each factor is
+  normalized to [0,1], combined as `face_weight*face + iris_weight*iris`
+  (defaults 0.6 / 0.4), and access requires `combined >= combined_threshold AND
+  face_ok AND iris_ok`. Weights/threshold live in `config/settings.yaml`
+  (`fusion:`). See `src/workflows/multimodelauth.py`.
+- **Blink liveness implemented.** Eye-aspect-ratio (EAR) blink detection
+  (`liveness:` config) provides basic anti-spoof; a static photo is rejected.
+- **Desktop GUI (CustomTkinter).** `app.py` is an in-process app with an
+  embedded live preview that drives capture frame-by-frame on the main thread,
+  via `BiometricService` (`src/workflows/service.py`). It decides outcomes from
+  structured result objects, not by parsing CLI stdout.
+- **Storage** is raw `sqlite3` (the SQLAlchemy dependency is unused).
+
+---
+
 ## 2. System Architecture
 
 ### 2.1 High-Level Architecture

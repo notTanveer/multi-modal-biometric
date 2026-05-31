@@ -6,9 +6,11 @@ A biometric authentication system that combines **Face Recognition** and **Iris 
 
 * Face Enrollment
 * Face Verification
-* Iris Template Generation
+* Iris Template Generation (CLAHE-normalized, multi-sample averaged)
 * Iris Verification
-* Multi-Modal Authentication
+* Blink-based Liveness (anti-spoof)
+* Multi-Modal Authentication (weighted fusion + AND gate)
+* CustomTkinter GUI (live preview, in-process)
 * User Management
 * SQLite Database Storage
 
@@ -58,11 +60,27 @@ source .venv/bin/activate
 .venv\Scripts\activate
 ```
 
-Install dependencies:
+Install dependencies (includes `customtkinter` for the GUI):
 
 ```bash
 pip install -r requirements.txt
 ```
+
+---
+
+# Run the GUI (recommended)
+
+```bash
+python app.py
+```
+
+A CustomTkinter window opens with a live camera preview and buttons for
+**Enroll**, **Verify (Face)**, **Authenticate**, **List Users**, **Delete
+User**, and **Cancel / Clear**. The GUI runs the workflows in-process and drives
+capture inside the embedded preview (no separate OpenCV windows). During
+**Authenticate**, blink deliberately when prompted for the liveness step.
+
+The CLI workflow below is an alternative to the GUI.
 
 ---
 
@@ -118,23 +136,26 @@ Face Verification
 
 # Full Multi-Modal Authentication
 
-Run complete Face + Iris authentication:
+Run complete Face + Iris authentication (pass the user ID):
 
 ```bash
-python test_fusionauth.py
+python test_fusionauth.py user1
 ```
 
-Expected Output:
+The flow runs face verification, then iris verification with a **blink liveness**
+check, then weighted score fusion. Blink when the iris step starts.
+
+Expected Output (final result object):
 
 ```text
-STEP 1: FACE VERIFICATION
-✓ PASSED
-
-STEP 2: IRIS VERIFICATION
-✓ PASSED
-
-Authentication Successful
+FINAL RESULT
+MultiModalVerificationResult(success=True, user_id='user1', face_success=True,
+  iris_success=True, face_confidence=..., iris_confidence=...,
+  combined_confidence=..., message='Authentication Successful')
 ```
+
+`success=True` only when both factors pass **and** the combined score clears
+`fusion.combined_threshold`. A face-pass / iris-fail returns `success=False`.
 
 ---
 
@@ -159,16 +180,11 @@ sahil -> Sahil
 
 # Delete User
 
-Delete a user and face template:
+Delete a user and all templates (face + iris). Easiest from the GUI's **Delete
+User** button, or on the CLI:
 
 ```bash
-python -c "from src.database.storage import DatabaseManager; db=DatabaseManager(); db.initialize(); db.delete_face_template('user5'); db.delete_user('user5'); print('Deleted user5')"
-```
-
-Example:
-
-```bash
-python -c "from src.database.storage import DatabaseManager; db=DatabaseManager(); db.initialize(); db.delete_face_template('user1'); db.delete_user('user1'); print('Deleted user1')"
+python -c "from src.database.storage import DatabaseManager; db=DatabaseManager(); db.initialize(); db.delete_face_template('user5'); db.delete_iris_template('user5'); db.delete_user('user5'); print('Deleted user5')"
 ```
 
 ---
@@ -180,6 +196,11 @@ python demo/face_demo.py enroll user1 "Masum" -s 3
 ```
 
 If the user already exists, delete the user first and then enroll again.
+
+> **Note:** iris templates enrolled before the iris-pipeline overhaul (symmetric
+> crop + CLAHE + multi-sample averaging) are incompatible with the current
+> matcher. If a previously-enrolled user fails iris verification, re-enroll them.
+> Face encodings are unaffected.
 
 ---
 
@@ -246,8 +267,10 @@ python test_fusionauth.py
 * face_recognition
 * NumPy
 * SQLite
-* Iris Recognition Module
-* Multi-Modal Biometric Fusion
+* Iris Recognition Module (appearance-based, RGB)
+* Blink-based Liveness (eye-aspect-ratio)
+* Multi-Modal Biometric Fusion (weighted score + AND gate)
+* CustomTkinter GUI
 
 ---
 
