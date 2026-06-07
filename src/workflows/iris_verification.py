@@ -85,6 +85,17 @@ class IrisVerificationWorkflow:
             left_eye_img = self.iris_system.crop_eye(frame, eyes["left_eye"])
             right_eye_img = self.iris_system.crop_eye(frame, eyes["right_eye"])
 
+            # Gate on crop quality before templating: an empty/edge crop would
+            # otherwise crash generate_iris_template (cvtColor on a 0-size array).
+            if not (self.iris_system.is_acceptable(left_eye_img)
+                    and self.iris_system.is_acceptable(right_eye_img)):
+                return IrisVerificationResult(
+                    success=False,
+                    user_id=user_id,
+                    liveness_passed=liveness_passed,
+                    message="Eye image quality too low",
+                )
+
             live_left = self.iris_system.generate_iris_template(left_eye_img)
             live_right = self.iris_system.generate_iris_template(right_eye_img)
 
@@ -96,7 +107,7 @@ class IrisVerificationWorkflow:
             logger.debug("iris threshold=%.3f avg_distance=%.3f", self.threshold, avg_distance)
 
             success = avg_distance < self.threshold
-            confidence = max(0.0, (1 - avg_distance / self.threshold) * 100)
+            confidence = max(0.0, (1 - avg_distance / max(self.threshold, 1e-6)) * 100)
 
             return IrisVerificationResult(
                 success=success,

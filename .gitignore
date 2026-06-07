@@ -2,7 +2,10 @@ __pycache__/
 *.pyc
 debug_*.jpg
 *.db
+*.db-wal
+*.db-shm
 .env
+.pytest_cache/
 .venv
 src/*/__pycache__/*
 CLAUDE.md

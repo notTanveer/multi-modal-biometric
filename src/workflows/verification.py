@@ -15,7 +15,6 @@ from ..capture.camera import Camera
 from ..face.recognition import (
     FaceRecognitionSystem,
     FaceTemplate,
-    MatchResult,
 )
 from ..database.storage import DatabaseManager, FaceTemplateRecord
 from ..utils.config import get_config
@@ -195,7 +194,7 @@ class FaceVerificationWorkflow:
         processing_time = (time.time() - start_time) * 1000
         
         # Calculate confidence (inverse of distance)
-        confidence = max(0.0, (1.0 - distance / self.face_threshold) * 100)
+        confidence = max(0.0, (1.0 - distance / max(self.face_threshold, 1e-6)) * 100)
         
         # Log verification attempt
         self.db.log_verification(
@@ -274,7 +273,7 @@ class FaceVerificationWorkflow:
         user_name = user.name if user else user_id
         
         # Calculate confidence
-        confidence = max(0.0, (1.0 - distance / self.face_threshold) * 100)
+        confidence = max(0.0, (1.0 - distance / max(self.face_threshold, 1e-6)) * 100)
         
         self.db.log_verification(
             user_id=user_id,

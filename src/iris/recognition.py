@@ -96,6 +96,11 @@ class IrisRecognitionSystem:
 
     def generate_iris_template(self, eye_image: np.ndarray) -> np.ndarray:
         """Produce a normalized, flattened feature vector for an eye crop."""
+        if eye_image is None or eye_image.size == 0 or min(eye_image.shape[:2]) < 1:
+            raise ValueError(
+                "Cannot generate an iris template from an empty eye crop; "
+                "gate the crop with is_acceptable() first."
+            )
         gray = cv2.cvtColor(eye_image, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, (TEMPLATE_SIZE, TEMPLATE_SIZE))
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -114,7 +119,20 @@ class IrisRecognitionSystem:
         ``rmse`` is the root-mean-square pixel difference. ``correlation`` uses
         ``1 - normalized_cross_correlation`` so it is more tolerant of uniform
         brightness shifts. Both return a value where ``< threshold`` means match.
+
+        A shape mismatch means the stored template predates the current
+        (CLAHE / symmetric-crop / averaged) pipeline and is incompatible — return
+        ``inf`` so it reads as a clean non-match (prompting a re-enroll) instead
+        of raising a NumPy broadcasting error.
         """
+        if template1.shape != template2.shape:
+            logger.warning(
+                "Iris template shape mismatch (%s vs %s); stored template is "
+                "incompatible with the current matcher — re-enroll this user.",
+                template1.shape, template2.shape,
+            )
+            return float("inf")
+
         if self.metric == "correlation":
             a = template1 - template1.mean()
             b = template2 - template2.mean()

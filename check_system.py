@@ -23,7 +23,7 @@ def check_imports():
         ("numpy", "NumPy"),
         ("yaml", "PyYAML"),
         ("pydantic", "Pydantic"),
-        ("sqlalchemy", "SQLAlchemy"),
+        ("customtkinter", "CustomTkinter"),
     ]
     
     all_ok = True

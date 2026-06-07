@@ -17,6 +17,7 @@ from typing import Optional
 
 from .verification import FaceVerificationWorkflow
 from .iris_verification import IrisVerificationWorkflow
+from .fusion import combine_scores, normalize
 from ..database.storage import DatabaseManager
 from ..utils.config import get_config
 
@@ -58,11 +59,6 @@ class MultiModalVerificationWorkflow:
         self.iris_weight = fusion.iris_weight
         self.combined_threshold = fusion.combined_threshold
 
-    @staticmethod
-    def _normalize(confidence: float) -> float:
-        """Map a 0-100 per-factor confidence onto a [0, 1] fusion score."""
-        return max(0.0, min(1.0, confidence / 100.0))
-
     def verify(self, user_id: str) -> MultiModalVerificationResult:
         """Run face then iris verification and fuse the scores.
 
@@ -76,7 +72,7 @@ class MultiModalVerificationWorkflow:
         logger.info("=" * 60)
 
         face_result = self.face_workflow.verify(user_id)
-        face_norm = self._normalize(face_result.confidence)
+        face_norm = normalize(face_result.confidence)
 
         if not face_result.success:
             self.db.log_verification(
@@ -102,10 +98,12 @@ class MultiModalVerificationWorkflow:
         logger.info("=" * 60)
 
         iris_result = self.iris_workflow.verify(user_id)
-        iris_norm = self._normalize(iris_result.confidence)
+        iris_norm = normalize(iris_result.confidence)
 
         # Weighted score-level fusion on the [0, 1] scale.
-        combined_norm = self.face_weight * face_norm + self.iris_weight * iris_norm
+        combined_norm = combine_scores(
+            face_norm, iris_norm, self.face_weight, self.iris_weight
+        )
 
         # AND gate: both factors must individually pass AND the fused score must
         # clear the combined threshold.

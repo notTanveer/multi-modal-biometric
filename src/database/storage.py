@@ -95,11 +95,18 @@ class DatabaseManager:
         """Get thread-local database connection."""
         if not hasattr(self._local, 'connection') or self._local.connection is None:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._local.connection = sqlite3.connect(
-                str(self.db_path),
-                detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-            )
-            self._local.connection.row_factory = sqlite3.Row
+            # No detect_types: TIMESTAMP columns come back as ISO strings and the
+            # read paths already parse them with datetime.fromisoformat. This also
+            # avoids sqlite3's deprecated default timestamp converter (Py 3.12+).
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            # SQLite ignores foreign keys (and thus the schema's ON DELETE CASCADE)
+            # unless this is enabled per connection. WAL + a busy timeout keep the
+            # threaded GUI's reads/writes from tripping over each other.
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 5000")
+            self._local.connection = conn
         return self._local.connection
     
     def initialize(self) -> None:
