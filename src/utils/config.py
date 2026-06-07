@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 
 class CameraConfig(BaseModel):
@@ -23,6 +23,20 @@ class FaceRecognitionConfig(BaseModel):
     match_tolerance: float = 0.6
     strict_tolerance: float = 0.5
     min_face_size: int = 50
+
+    @field_validator("detection_model")
+    @classmethod
+    def _check_model(cls, v: str) -> str:
+        if v not in {"hog", "cnn"}:
+            raise ValueError(f"detection_model must be 'hog' or 'cnn', got '{v}'")
+        return v
+
+    @field_validator("match_tolerance", "strict_tolerance")
+    @classmethod
+    def _check_tolerance(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"tolerance must be > 0, got {v}")
+        return v
 
 
 class QualityConfig(BaseModel):
@@ -49,6 +63,27 @@ class LivenessConfig(BaseModel):
     min_blinks: int = 1               # Blinks required to consider input "live"
     timeout_seconds: float = 6.0      # Max time to wait for a blink
 
+    @field_validator("ear_threshold")
+    @classmethod
+    def _check_ear(cls, v: float) -> float:
+        if not 0.0 < v < 1.0:
+            raise ValueError(f"ear_threshold must be in (0, 1), got {v}")
+        return v
+
+    @field_validator("min_blinks")
+    @classmethod
+    def _check_min_blinks(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"min_blinks must be >= 0, got {v}")
+        return v
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def _check_timeout(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"timeout_seconds must be > 0, got {v}")
+        return v
+
 
 class VerificationConfig(BaseModel):
     max_attempts: int = 3
@@ -63,12 +98,56 @@ class IrisConfig(BaseModel):
     min_sharpness: float = 15.0       # Laplacian-variance gate for eye crops
     metric: str = "rmse"              # "rmse" or "correlation"
 
+    @field_validator("metric")
+    @classmethod
+    def _check_metric(cls, v: str) -> str:
+        if v not in {"rmse", "correlation"}:
+            raise ValueError(f"metric must be 'rmse' or 'correlation', got '{v}'")
+        return v
+
+    @field_validator("threshold")
+    @classmethod
+    def _check_threshold(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"threshold must be > 0, got {v}")
+        return v
+
+    @field_validator("num_samples")
+    @classmethod
+    def _check_num_samples(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"num_samples must be >= 1, got {v}")
+        return v
+
 
 class FusionConfig(BaseModel):
     """Score-level fusion settings for multi-modal decision."""
     face_weight: float = 0.6
     iris_weight: float = 0.4
     combined_threshold: float = 0.6   # On the normalized [0,1] weighted score
+
+    @field_validator("face_weight", "iris_weight")
+    @classmethod
+    def _check_weight(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f"fusion weights must be in [0, 1], got {v}")
+        return v
+
+    @field_validator("combined_threshold")
+    @classmethod
+    def _check_threshold(cls, v: float) -> float:
+        if not 0.0 < v <= 1.0:
+            raise ValueError(f"combined_threshold must be in (0, 1], got {v}")
+        return v
+
+    @model_validator(mode="after")
+    def _check_weights_sum(self) -> "FusionConfig":
+        total = self.face_weight + self.iris_weight
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"face_weight + iris_weight must sum to 1.0, got {total:.4f}"
+            )
+        return self
 
 
 class SystemConfig(BaseModel):
@@ -110,14 +189,21 @@ def load_config(config_path: Optional[str] = None) -> Config:
         config_path = get_project_root() / "config" / "settings.yaml"
     
     config_path = Path(config_path)
-    
-    if config_path.exists():
-        with open(config_path, 'r') as f:
-            yaml_config = yaml.safe_load(f)
-            return Config(**yaml_config)
-    else:
+
+    if not config_path.exists():
         print(f"Warning: Config file not found at {config_path}, using defaults")
         return Config()
+
+    try:
+        with open(config_path, 'r') as f:
+            yaml_config = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        raise RuntimeError(f"Invalid YAML in config at {config_path}: {exc}") from exc
+
+    try:
+        return Config(**yaml_config)
+    except ValidationError as exc:
+        raise RuntimeError(f"Invalid config at {config_path}: {exc}") from exc
 
 
 # Global config instance

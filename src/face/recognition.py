@@ -76,19 +76,6 @@ class FaceTemplate:
         return np.mean(self.encodings, axis=0)
 
 
-@dataclass
-class MatchResult:
-    """Result of a face matching operation."""
-    is_match: bool
-    user_id: Optional[str] = None
-    similarity: float = 0.0
-    
-    @property
-    def confidence(self) -> float:
-        """Get confidence as percentage (0-100)."""
-        return max(0.0, min(100.0, self.similarity * 100))
-
-
 class FaceDetector:
     """
     Face detection using face_recognition library.

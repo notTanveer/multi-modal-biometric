@@ -26,6 +26,7 @@ from .enrollment import FaceEnrollmentWorkflow
 from .verification import FaceVerificationWorkflow, VerificationResult
 from .iris_verification import IrisVerificationWorkflow
 from .multimodelauth import MultiModalVerificationWorkflow, MultiModalVerificationResult
+from .fusion import combine_scores, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ class BiometricService:
         is_match, distance, _ = self.face_system.matcher.compare_to_template(
             template, face.encoding
         )
-        tol = self.face_system.matcher.tolerance
+        tol = max(self.face_system.matcher.tolerance, 1e-6)
         confidence = max(0.0, (1.0 - distance / tol) * 100)
         loc = face.location
         return FaceMatch(
@@ -161,17 +162,23 @@ class BiometricService:
             and self.iris_system.is_acceptable(right_crop)
         )
 
+        # Only template/compare on good crops. On poor frames (mid-blink, eye at
+        # the edge) still report the eyes + EAR so the caller's blink/liveness
+        # state machine keeps advancing — just don't claim a match.
+        if not quality_ok:
+            return IrisMatch(found=True, ear=ear, quality_ok=False)
+
         live_left = self.iris_system.generate_iris_template(left_crop)
         live_right = self.iris_system.generate_iris_template(right_crop)
         left_d = self.iris_system.compare_iris_templates(live_left, left_template)
         right_d = self.iris_system.compare_iris_templates(live_right, right_template)
         avg = (left_d + right_d) / 2
 
-        thr = self.iris_system.threshold
+        thr = max(self.iris_system.threshold, 1e-6)
         confidence = max(0.0, (1 - avg / thr) * 100)
         return IrisMatch(
             found=True,
-            is_match=avg < thr,
+            is_match=avg < self.iris_system.threshold,
             distance=avg,
             confidence=confidence,
             ear=ear,
@@ -181,9 +188,12 @@ class BiometricService:
     def fuse(self, face_confidence: float, iris_confidence: float):
         """Weighted score-level fusion. Returns ``(combined_norm, combined_pct)``."""
         f = self.config.fusion
-        face_norm = max(0.0, min(1.0, face_confidence / 100.0))
-        iris_norm = max(0.0, min(1.0, iris_confidence / 100.0))
-        combined_norm = f.face_weight * face_norm + f.iris_weight * iris_norm
+        combined_norm = combine_scores(
+            normalize(face_confidence),
+            normalize(iris_confidence),
+            f.face_weight,
+            f.iris_weight,
+        )
         return combined_norm, combined_norm * 100.0
 
     def collect_iris_sample(self, frame, left_bucket: list, right_bucket: list, num_samples: int) -> bool:

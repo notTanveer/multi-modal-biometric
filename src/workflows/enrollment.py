@@ -550,8 +550,11 @@ class FaceEnrollmentWorkflow:
                 message=f"User '{user_id}' not found"
             )
         
-        # Delete existing template
+        # Delete existing templates. With ON DELETE CASCADE now active,
+        # delete_user() alone would suffice, but clear both template kinds
+        # explicitly so a re-enroll never leaves a stale iris row behind.
         self.db.delete_face_template(user_id)
+        self.db.delete_iris_template(user_id)
         self.db.delete_user(user_id)
         
         # Re-enroll

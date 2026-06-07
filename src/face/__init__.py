@@ -8,16 +8,14 @@ from .recognition import (
     FaceLocation,
     DetectedFace,
     FaceTemplate,
-    MatchResult,
 )
 
 __all__ = [
     "FaceDetector",
-    "FaceEncoder", 
+    "FaceEncoder",
     "FaceMatcher",
     "FaceRecognitionSystem",
     "FaceLocation",
     "DetectedFace",
     "FaceTemplate",
-    "MatchResult",
 ]
